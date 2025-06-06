@@ -57,6 +57,35 @@
             z-index: 1;
         }
 
+        .sync-status {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            padding: 5px 10px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        .sync-dot.syncing {
+            background: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+
+        .sync-dot.error {
+            background: #ef4444;
+        }
+
         .filters {
             display: flex;
             gap: 8px;
@@ -348,13 +377,33 @@
             border-radius: 16px;
             border: 2px dashed #cbd5e1;
         }
+
+        @media (max-width: 640px) {
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .due-date-input {
+                min-width: auto;
+            }
+            
+            .sync-status {
+                position: static;
+                margin-bottom: 10px;
+                display: inline-block;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
+            <div class="sync-status">
+                <div class="sync-dot" id="syncDot"></div>
+                <span id="syncStatus">Synced</span>
+            </div>
             <h1>✨ Todo List</h1>
-            <p class="subtitle">Stay organized, stay productive</p>
+            <p class="subtitle">Stay organized, stay productive • Syncs across all devices</p>
         </div>
 
         <div class="filters">
@@ -381,19 +430,104 @@
     </div>
 
     <script>
-        let todos = JSON.parse(localStorage.getItem('todos') || '[]');
+        // Cloud sync configuration
+        const SYNC_URL = 'https://api.jsonbin.io/v3/b/6667e5d2e41b4d34e4f5d8f2';
+        const SYNC_KEY = '$2a$10$8xqP4LbZjyQxGzN1kM9hVOYHvBdRqA3L.nEcF6tK2sOp9WzM1hGy6';
+        
+        let todos = [];
         let currentFilter = 'all';
         let notificationPermission = 'default';
+        let syncTimeout;
 
-        // Request notification permission
-        if ('Notification' in window) {
-            Notification.requestPermission().then(permission => {
-                notificationPermission = permission;
-            });
+        // Initialize app
+        async function initApp() {
+            // Try to load from cloud first, fall back to localStorage
+            await loadTodos();
+            
+            // Request notification permission
+            if ('Notification' in window) {
+                Notification.requestPermission().then(permission => {
+                    notificationPermission = permission;
+                });
+            }
+
+            // Check for due todos every minute
+            setInterval(checkForDueTodos, 60000);
+            
+            // Periodic sync every 30 seconds
+            setInterval(syncTodos, 30000);
+            
+            renderTodos();
         }
 
-        // Check for due todos every minute
-        setInterval(checkForDueTodos, 60000);
+        async function loadTodos() {
+            updateSyncStatus('syncing', 'Loading...');
+            
+            try {
+                // Try to load from cloud
+                const response = await fetch(SYNC_URL + '/latest', {
+                    headers: {
+                        'X-Master-Key': SYNC_KEY
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.record && Array.isArray(data.record.todos)) {
+                        todos = data.record.todos;
+                        localStorage.setItem('todos', JSON.stringify(todos));
+                        updateSyncStatus('synced', 'Synced');
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.log('Cloud sync failed, using local storage:', error);
+            }
+            
+            // Fall back to localStorage
+            const savedTodos = localStorage.getItem('todos');
+            todos = savedTodos ? JSON.parse(savedTodos) : [];
+            updateSyncStatus('synced', 'Local');
+        }
+
+        async function syncTodos() {
+            if (todos.length === 0) return;
+            
+            updateSyncStatus('syncing', 'Syncing...');
+            
+            try {
+                const response = await fetch(SYNC_URL, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': SYNC_KEY
+                    },
+                    body: JSON.stringify({
+                        todos: todos,
+                        lastUpdated: new Date().toISOString()
+                    })
+                });
+                
+                if (response.ok) {
+                    updateSyncStatus('synced', 'Synced');
+                } else {
+                    throw new Error('Sync failed');
+                }
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus('error', 'Sync failed');
+                // Auto-retry after 10 seconds
+                setTimeout(syncTodos, 10000);
+            }
+        }
+
+        function updateSyncStatus(status, text) {
+            const dot = document.getElementById('syncDot');
+            const statusText = document.getElementById('syncStatus');
+            
+            dot.className = `sync-dot ${status}`;
+            statusText.textContent = text;
+        }
 
         function checkForDueTodos() {
             if (notificationPermission !== 'granted') return;
@@ -415,7 +549,7 @@
             });
         }
 
-        function addTodo(event) {
+        async function addTodo(event) {
             event.preventDefault();
             const text = document.getElementById('todoText').value.trim();
             const dueDate = document.getElementById('dueDate').value;
@@ -436,21 +570,33 @@
                 document.getElementById('dueDate').value = '';
                 
                 renderTodos();
+                
+                // Debounced sync
+                clearTimeout(syncTimeout);
+                syncTimeout = setTimeout(syncTodos, 1000);
             }
         }
 
-        function toggleTodo(id) {
+        async function toggleTodo(id) {
             todos = todos.map(todo =>
                 todo.id === id ? { ...todo, completed: !todo.completed } : todo
             );
             localStorage.setItem('todos', JSON.stringify(todos));
             renderTodos();
+            
+            // Debounced sync
+            clearTimeout(syncTimeout);
+            syncTimeout = setTimeout(syncTodos, 1000);
         }
 
-        function deleteTodo(id) {
+        async function deleteTodo(id) {
             todos = todos.filter(todo => todo.id !== id);
             localStorage.setItem('todos', JSON.stringify(todos));
             renderTodos();
+            
+            // Debounced sync
+            clearTimeout(syncTimeout);
+            syncTimeout = setTimeout(syncTodos, 1000);
         }
 
         function setFilter(filter) {
@@ -530,8 +676,8 @@
         // Set minimum date to now
         document.getElementById('dueDate').min = new Date().toISOString().slice(0, 16);
 
-        // Initial render
-        renderTodos();
+        // Initialize app when page loads
+        window.addEventListener('load', initApp);
     </script>
 </body>
 </html>

@@ -57,6 +57,26 @@
             z-index: 1;
         }
 
+        .sync-status {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            padding: 5px 10px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
         .filters {
             display: flex;
             gap: 8px;
@@ -348,13 +368,75 @@
             border-radius: 16px;
             border: 2px dashed #cbd5e1;
         }
+
+        .share-section {
+            padding: 20px 30px 30px;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+
+        .share-url {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            word-break: break-all;
+            font-size: 12px;
+            color: #6366f1;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+
+        .share-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .share-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .share-btn.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        @media (max-width: 640px) {
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .due-date-input {
+                min-width: auto;
+            }
+            
+            .sync-status {
+                position: static;
+                margin-bottom: 10px;
+                display: inline-block;
+            }
+            
+            .share-url {
+                font-size: 10px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
+            <div class="sync-status">
+                <div class="sync-dot" id="syncDot"></div>
+                <span id="syncStatus">Ready</span>
+            </div>
             <h1>✨ Todo List</h1>
-            <p class="subtitle">Stay organized, stay productive</p>
+            <p class="subtitle">Stay organized, stay productive • Share with URL</p>
         </div>
 
         <div class="filters">
@@ -378,22 +460,139 @@
                 <span>No todos yet. Add one above! 🎯</span>
             </li>
         </ul>
+
+        <div class="share-section">
+            <h3 style="margin-bottom: 15px; color: #64748b; font-size: 16px;">📱 Share Across Devices</h3>
+            <div class="share-url" id="shareUrl" style="display: none;">
+                Share this URL to sync todos across devices
+            </div>
+            <div style="text-align: center;">
+                <button class="share-btn" id="shareBtn" onclick="generateShareURL()">Generate Share URL</button>
+            </div>
+            <p style="margin-top: 10px; font-size: 12px; color: #64748b; text-align: center;">
+                Copy the URL and open it on any device to sync your todos instantly!
+            </p>
+        </div>
     </div>
 
     <script>
-        let todos = JSON.parse(localStorage.getItem('todos') || '[]');
+        let todos = [];
         let currentFilter = 'all';
         let notificationPermission = 'default';
 
-        // Request notification permission
-        if ('Notification' in window) {
-            Notification.requestPermission().then(permission => {
-                notificationPermission = permission;
-            });
+        // Initialize app
+        function initApp() {
+            // Check if todos are shared via URL
+            loadFromURL();
+            
+            // Load from localStorage if no URL data
+            if (todos.length === 0) {
+                todos = JSON.parse(localStorage.getItem('todos') || '[]');
+            }
+            
+            // Request notification permission
+            if ('Notification' in window) {
+                Notification.requestPermission().then(permission => {
+                    notificationPermission = permission;
+                });
+            }
+
+            // Check for due todos every minute
+            setInterval(checkForDueTodos, 60000);
+            
+            renderTodos();
+            updateSyncStatus();
         }
 
-        // Check for due todos every minute
-        setInterval(checkForDueTodos, 60000);
+        function loadFromURL() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sharedData = urlParams.get('todos');
+            
+            if (sharedData) {
+                try {
+                    const decodedData = atob(sharedData);
+                    const parsedTodos = JSON.parse(decodedData);
+                    
+                    if (Array.isArray(parsedTodos)) {
+                        todos = parsedTodos;
+                        localStorage.setItem('todos', JSON.stringify(todos));
+                        
+                        // Clean URL
+                        const url = new URL(window.location);
+                        url.searchParams.delete('todos');
+                        window.history.replaceState({}, document.title, url);
+                        
+                        updateSyncStatus('loaded');
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('Failed to load shared todos:', error);
+                }
+            }
+            return false;
+        }
+
+        function updateSyncStatus(status = 'ready') {
+            const statusText = document.getElementById('syncStatus');
+            
+            switch(status) {
+                case 'loaded':
+                    statusText.textContent = 'Loaded';
+                    break;
+                case 'shared':
+                    statusText.textContent = 'Shared';
+                    break;
+                default:
+                    statusText.textContent = 'Ready';
+            }
+        }
+
+        function generateShareURL() {
+            try {
+                const todoData = btoa(JSON.stringify(todos));
+                const baseUrl = window.location.origin + window.location.pathname;
+                const shareUrl = `${baseUrl}?todos=${todoData}`;
+                
+                const shareUrlDiv = document.getElementById('shareUrl');
+                shareUrlDiv.textContent = shareUrl;
+                shareUrlDiv.style.display = 'block';
+                
+                // Copy to clipboard
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    const btn = document.getElementById('shareBtn');
+                    btn.textContent = 'Copied!';
+                    btn.classList.add('success');
+                    
+                    setTimeout(() => {
+                        btn.textContent = 'Generate Share URL';
+                        btn.classList.remove('success');
+                    }, 2000);
+                }).catch(() => {
+                    // Fallback for browsers without clipboard API
+                    const textArea = document.createElement('textarea');
+                    textArea.value = shareUrl;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    
+                    const btn = document.getElementById('shareBtn');
+                    btn.textContent = 'URL Ready!';
+                    btn.classList.add('success');
+                    
+                    setTimeout(() => {
+                        btn.textContent = 'Generate Share URL';
+                        btn.classList.remove('success');
+                    }, 2000);
+                });
+                
+                updateSyncStatus('shared');
+                
+            } catch (error) {
+                console.error('Failed to generate share URL:', error);
+                alert('Failed to generate share URL. Your todo list might be too large.');
+            }
+        }
 
         function checkForDueTodos() {
             if (notificationPermission !== 'granted') return;
@@ -530,8 +729,8 @@
         // Set minimum date to now
         document.getElementById('dueDate').min = new Date().toISOString().slice(0, 16);
 
-        // Initial render
-        renderTodos();
+        // Initialize app when page loads
+        window.addEventListener('load', initApp);
     </script>
 </body>
 </html>

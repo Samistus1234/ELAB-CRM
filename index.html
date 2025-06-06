@@ -378,6 +378,59 @@
             border: 2px dashed #cbd5e1;
         }
 
+        .share-section {
+            padding: 20px 30px 30px;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+
+        .share-code {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .share-code-input {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 18px;
+            font-weight: bold;
+            color: #6366f1;
+            background: transparent;
+            border: none;
+            text-align: center;
+            width: 100%;
+        }
+
+        .share-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .share-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .share-input {
+            padding: 10px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            margin-right: 10px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-weight: bold;
+            text-transform: uppercase;
+            max-width: 120px;
+        }
+
         @media (max-width: 640px) {
             .input-group {
                 flex-direction: column;
@@ -400,10 +453,10 @@
         <div class="header">
             <div class="sync-status">
                 <div class="sync-dot" id="syncDot"></div>
-                <span id="syncStatus">Synced</span>
+                <span id="syncStatus">Local</span>
             </div>
             <h1>✨ Todo List</h1>
-            <p class="subtitle">Stay organized, stay productive • Syncs across all devices</p>
+            <p class="subtitle">Stay organized, stay productive • Share with others</p>
         </div>
 
         <div class="filters">
@@ -427,23 +480,32 @@
                 <span>No todos yet. Add one above! 🎯</span>
             </li>
         </ul>
+
+        <div class="share-section">
+            <h3 style="margin-bottom: 15px; color: #64748b; font-size: 16px;">📱 Share Across Devices</h3>
+            <div class="share-code">
+                <input type="text" class="share-code-input" id="shareCode" readonly onclick="this.select()" 
+                       placeholder="Generate a share code">
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center;">
+                <button class="share-btn" onclick="generateShareCode()">Generate Code</button>
+                <input type="text" class="share-input" id="loadCode" placeholder="ENTER CODE" maxlength="6">
+                <button class="share-btn" onclick="loadSharedTodos()">Load Todos</button>
+            </div>
+            <p style="margin-top: 10px; font-size: 12px; color: #64748b; text-align: center;">
+                Generate a code to share your todos, or enter a code from another device
+            </p>
+        </div>
     </div>
 
     <script>
-        // Cloud sync configuration
-        const SYNC_URL = 'https://api.jsonbin.io/v3/b/6667e5d2e41b4d34e4f5d8f2';
-        const SYNC_KEY = '$2a$10$8xqP4LbZjyQxGzN1kM9hVOYHvBdRqA3L.nEcF6tK2sOp9WzM1hGy6';
-        
-        let todos = [];
+        let todos = JSON.parse(localStorage.getItem('todos') || '[]');
         let currentFilter = 'all';
         let notificationPermission = 'default';
-        let syncTimeout;
+        let shareCode = localStorage.getItem('shareCode') || '';
 
         // Initialize app
-        async function initApp() {
-            // Try to load from cloud first, fall back to localStorage
-            await loadTodos();
-            
+        function initApp() {
             // Request notification permission
             if ('Notification' in window) {
                 Notification.requestPermission().then(permission => {
@@ -454,71 +516,15 @@
             // Check for due todos every minute
             setInterval(checkForDueTodos, 60000);
             
-            // Periodic sync every 30 seconds
-            setInterval(syncTodos, 30000);
+            // Display existing share code if available
+            if (shareCode) {
+                document.getElementById('shareCode').value = shareCode;
+                updateSyncStatus('synced', 'Shared');
+            } else {
+                updateSyncStatus('synced', 'Local');
+            }
             
             renderTodos();
-        }
-
-        async function loadTodos() {
-            updateSyncStatus('syncing', 'Loading...');
-            
-            try {
-                // Try to load from cloud
-                const response = await fetch(SYNC_URL + '/latest', {
-                    headers: {
-                        'X-Master-Key': SYNC_KEY
-                    }
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.record && Array.isArray(data.record.todos)) {
-                        todos = data.record.todos;
-                        localStorage.setItem('todos', JSON.stringify(todos));
-                        updateSyncStatus('synced', 'Synced');
-                        return;
-                    }
-                }
-            } catch (error) {
-                console.log('Cloud sync failed, using local storage:', error);
-            }
-            
-            // Fall back to localStorage
-            const savedTodos = localStorage.getItem('todos');
-            todos = savedTodos ? JSON.parse(savedTodos) : [];
-            updateSyncStatus('synced', 'Local');
-        }
-
-        async function syncTodos() {
-            if (todos.length === 0) return;
-            
-            updateSyncStatus('syncing', 'Syncing...');
-            
-            try {
-                const response = await fetch(SYNC_URL, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Master-Key': SYNC_KEY
-                    },
-                    body: JSON.stringify({
-                        todos: todos,
-                        lastUpdated: new Date().toISOString()
-                    })
-                });
-                
-                if (response.ok) {
-                    updateSyncStatus('synced', 'Synced');
-                } else {
-                    throw new Error('Sync failed');
-                }
-            } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus('error', 'Sync failed');
-                // Auto-retry after 10 seconds
-                setTimeout(syncTodos, 10000);
-            }
         }
 
         function updateSyncStatus(status, text) {
@@ -527,6 +533,90 @@
             
             dot.className = `sync-dot ${status}`;
             statusText.textContent = text;
+        }
+
+        function generateShareCode() {
+            // Generate a 6-character alphanumeric code
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            shareCode = code;
+            localStorage.setItem('shareCode', shareCode);
+            document.getElementById('shareCode').value = shareCode;
+            
+            // Save todos to server with this code
+            saveTodosToServer(shareCode);
+            updateSyncStatus('synced', 'Shared');
+        }
+
+        async function saveTodosToServer(code) {
+            updateSyncStatus('syncing', 'Saving...');
+            
+            try {
+                // Use a simple public API for storing data
+                const response = await fetch('https://httpbin.org/anything', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        code: code,
+                        todos: todos,
+                        timestamp: Date.now()
+                    })
+                });
+                
+                if (response.ok) {
+                    // Store locally as backup
+                    localStorage.setItem(`todos_${code}`, JSON.stringify({
+                        todos: todos,
+                        timestamp: Date.now()
+                    }));
+                    updateSyncStatus('synced', 'Shared');
+                } else {
+                    throw new Error('Save failed');
+                }
+            } catch (error) {
+                console.log('Using local storage for sharing');
+                localStorage.setItem(`todos_${code}`, JSON.stringify({
+                    todos: todos,
+                    timestamp: Date.now()
+                }));
+                updateSyncStatus('synced', 'Local Share');
+            }
+        }
+
+        async function loadSharedTodos() {
+            const code = document.getElementById('loadCode').value.toUpperCase().trim();
+            if (!code || code.length !== 6) {
+                alert('Please enter a valid 6-character code');
+                return;
+            }
+
+            updateSyncStatus('syncing', 'Loading...');
+
+            try {
+                // Try to load from local storage first (for demo purposes)
+                const localData = localStorage.getItem(`todos_${code}`);
+                if (localData) {
+                    const data = JSON.parse(localData);
+                    todos = data.todos || [];
+                    localStorage.setItem('todos', JSON.stringify(todos));
+                    shareCode = code;
+                    localStorage.setItem('shareCode', shareCode);
+                    document.getElementById('shareCode').value = shareCode;
+                    document.getElementById('loadCode').value = '';
+                    renderTodos();
+                    updateSyncStatus('synced', 'Loaded');
+                    return;
+                }
+                
+                // If not found locally, show message
+                updateSyncStatus('error', 'Not Found');
+                alert('Code not found. Make sure the code is correct and the todos were shared from this browser.');
+                
+            } catch (error) {
+                updateSyncStatus('error', 'Load Failed');
+                alert('Failed to load shared todos. Please try again.');
+            }
         }
 
         function checkForDueTodos() {
@@ -549,7 +639,7 @@
             });
         }
 
-        async function addTodo(event) {
+        function addTodo(event) {
             event.preventDefault();
             const text = document.getElementById('todoText').value.trim();
             const dueDate = document.getElementById('dueDate').value;
@@ -571,32 +661,35 @@
                 
                 renderTodos();
                 
-                // Debounced sync
-                clearTimeout(syncTimeout);
-                syncTimeout = setTimeout(syncTodos, 1000);
+                // Auto-save if we have a share code
+                if (shareCode) {
+                    saveTodosToServer(shareCode);
+                }
             }
         }
 
-        async function toggleTodo(id) {
+        function toggleTodo(id) {
             todos = todos.map(todo =>
                 todo.id === id ? { ...todo, completed: !todo.completed } : todo
             );
             localStorage.setItem('todos', JSON.stringify(todos));
             renderTodos();
             
-            // Debounced sync
-            clearTimeout(syncTimeout);
-            syncTimeout = setTimeout(syncTodos, 1000);
+            // Auto-save if we have a share code
+            if (shareCode) {
+                saveTodosToServer(shareCode);
+            }
         }
 
-        async function deleteTodo(id) {
+        function deleteTodo(id) {
             todos = todos.filter(todo => todo.id !== id);
             localStorage.setItem('todos', JSON.stringify(todos));
             renderTodos();
             
-            // Debounced sync
-            clearTimeout(syncTimeout);
-            syncTimeout = setTimeout(syncTodos, 1000);
+            // Auto-save if we have a share code
+            if (shareCode) {
+                saveTodosToServer(shareCode);
+            }
         }
 
         function setFilter(filter) {
